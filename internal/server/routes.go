@@ -7,11 +7,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httplog/v2"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
+
+	r.Use(httplog.RequestLogger(&s.logger))
+
+	r.Use(middleware.AllowContentType("application/json"), middleware.CleanPath)
+
+	r.Use(middleware.Recoverer)
 
 	r.Get("/", s.HelloWorldHandler)
 
@@ -22,6 +28,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 func (s *Server) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
 	resp := make(map[string]string)
+
 	resp["message"] = "Hello World"
 
 	jsonResp, err := json.Marshal(resp)
