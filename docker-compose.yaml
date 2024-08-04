@@ -12,14 +12,25 @@ services:
     volumes:
       - ./var/pgsql_data:/var/lib/postgresql/data
 
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./var/loki_data:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+
   otel-collector:
-    image: otel/opentelemetry-collector:latest
+    image: otel/opentelemetry-collector-contrib:latest # Use contrib image for more exporters
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
     depends_on:
       - jaeger
       - prometheus
+      - loki # Add this line
+
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
@@ -43,6 +54,7 @@ services:
       - ./grafana-provisioning:/etc/grafana/provisioning
     depends_on:
       - prometheus
+      - loki # Add this line
 
   app:
     image: golang:latest
