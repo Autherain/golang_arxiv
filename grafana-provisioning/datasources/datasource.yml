@@ -5,3 +5,19 @@ datasources:
     type: prometheus
     access: proxy
     url: http://prometheus:9090
+
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    uid: jaeger
+
+  - name: PostgreSQL
+    type: postgres
+    url: psql:5432
+    database: ${DB_DATABASE}
+    user: ${DB_USERNAME}
+    secureJsonData:
+      password: ${DB_PASSWORD}
+    jsonData:
+      sslmode: "disable" # if you're not using SSL

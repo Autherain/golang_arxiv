@@ -11,6 +11,8 @@ import (
 	"os"
 	"sync"
 
+	_ "net/http/pprof"
+
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )

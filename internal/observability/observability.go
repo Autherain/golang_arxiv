@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -20,10 +21,12 @@ import (
 )
 
 var (
-	tracer     trace.Tracer
-	meter      metric.Meter
-	counters   = make(map[string]metric.Int64Counter)
-	histograms = make(map[string]metric.Float64Histogram)
+	tracer          trace.Tracer
+	meter           metric.Meter
+	counters        = make(map[string]metric.Int64Counter)
+	histograms      = make(map[string]metric.Float64Histogram)
+	gauges          = make(map[string]metric.Float64UpDownCounter)
+	lastKnownValues = make(map[string]float64)
 )
 
 type ObservabilityShutdownFunc func()
@@ -87,6 +90,29 @@ func InitTelemetry(serviceName string, tracingEndpoint string, metricEndpoint st
 	if _, err := CreateHistogram("http_request_duration_seconds", "HTTP request latencies in seconds", "s"); err != nil {
 		return nil, fmt.Errorf("failed to create http_request_duration_seconds histogram: %w", err)
 	}
+
+	// Add new metrics
+	if _, err := CreateGauge("memory_alloc_bytes", "Current memory allocation in bytes", "bytes"); err != nil {
+		return nil, fmt.Errorf("failed to create memory_alloc_bytes gauge: %w", err)
+	}
+	if _, err := CreateGauge("memory_total_alloc_bytes", "Total memory allocation in bytes", "bytes"); err != nil {
+		return nil, fmt.Errorf("failed to create memory_total_alloc_bytes gauge: %w", err)
+	}
+	if _, err := CreateGauge("memory_sys_bytes", "System memory obtained in bytes", "bytes"); err != nil {
+		return nil, fmt.Errorf("failed to create memory_sys_bytes gauge: %w", err)
+	}
+	if _, err := CreateGauge("num_goroutines", "Number of goroutines", "{count}"); err != nil {
+		return nil, fmt.Errorf("failed to create num_goroutines gauge: %w", err)
+	}
+	if _, err := CreateGauge("num_cpu", "Number of CPUs", "{count}"); err != nil {
+		return nil, fmt.Errorf("failed to create num_cpu gauge: %w", err)
+	}
+	if _, err := CreateCounter("gc_runs_total", "Total number of completed GC cycles", "{count}"); err != nil {
+		return nil, fmt.Errorf("failed to create gc_runs_total counter: %w", err)
+	}
+
+	// Start a goroutine to periodically update system metrics
+	go updateSystemMetrics(context.Background())
 
 	return ObservabilityShutdownFunc(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -159,6 +185,65 @@ func IncrementCounter(ctx context.Context, name string, value int64, attrs ...at
 func RecordHistogram(ctx context.Context, name string, value float64, attrs ...attribute.KeyValue) {
 	if histogram, exists := histograms[name]; exists {
 		histogram.Record(ctx, value, metric.WithAttributes(attrs...))
+	}
+}
+
+func CreateGauge(name, description, unit string) (metric.Float64UpDownCounter, error) {
+	if gauge, exists := gauges[name]; exists {
+		return gauge, nil
+	}
+	gauge, err := meter.Float64UpDownCounter(
+		name,
+		metric.WithDescription(description),
+		metric.WithUnit(unit),
+	)
+	if err != nil {
+		return nil, err
+	}
+	gauges[name] = gauge
+	return gauge, nil
+}
+
+func SetGauge(ctx context.Context, name string, value float64, attrs ...attribute.KeyValue) {
+	if gauge, exists := gauges[name]; exists {
+		current := getGaugeValue(ctx, name)
+		diff := value - current
+		gauge.Add(ctx, diff, metric.WithAttributes(attrs...))
+		lastKnownValues[name] = value
+	}
+}
+
+func getGaugeValue(ctx context.Context, name string) float64 {
+	return lastKnownValues[name]
+}
+
+func updateSystemMetrics(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	var m runtime.MemStats
+	var lastNumGC uint32
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runtime.ReadMemStats(&m)
+
+			SetGauge(ctx, "memory_alloc_bytes", float64(m.Alloc))
+			SetGauge(ctx, "memory_total_alloc_bytes", float64(m.TotalAlloc))
+			SetGauge(ctx, "memory_sys_bytes", float64(m.Sys))
+			SetGauge(ctx, "num_goroutines", float64(runtime.NumGoroutine()))
+			SetGauge(ctx, "num_cpu", float64(runtime.NumCPU()))
+
+			// Calculate the number of GC runs since last check
+			gcRuns := m.NumGC - lastNumGC
+			if gcRuns > 0 {
+				IncrementCounter(ctx, "gc_runs_total", int64(gcRuns))
+				lastNumGC = m.NumGC
+			}
+		}
 	}
 }
 
