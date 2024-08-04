@@ -1,3 +1,5 @@
+version: "3"
+
 services:
   psql:
     image: postgres:latest
@@ -9,3 +11,51 @@ services:
       - "${DB_PORT}:5432"
     volumes:
       - ./var/pgsql_data:/var/lib/postgresql/data
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    depends_on:
+      - jaeger
+      - prometheus
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686" # Jaeger UI
+      # - "14250:14250" # Jaeger gRPC
+      # - "4317:4317" # OTLP gRPC
+      # - "4318:4318" # OTLP HTTP
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana-provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+
+  app:
+    image: golang:latest
+    ports:
+      - "${API_PORT}:${API_PORT}"
+    volumes:
+      - ./.env:/go/app/.env
+      - ./tmp/api/api:/go/app/api
+    # command: tail -f /dev/null
+    command: ./api
+    working_dir: /go/app/
+    environment:
+      - DB_HOST=psql
+    depends_on:
+      - psql
+      - otel-collector
