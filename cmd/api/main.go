@@ -63,6 +63,8 @@ func main() {
 	defer zapLogger.Sync()
 
 	// Wrap Zap logger with OpenTelemetry
+	// If the telemetry not enabled then it is no big deal beacause i'll still work the same way
+	// Indeed, log will capture trace
 	logger := otelzap.New(zapLogger)
 	otelzap.ReplaceGlobals(logger)
 

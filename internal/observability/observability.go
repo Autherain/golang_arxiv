@@ -150,17 +150,23 @@ func createMetrics() error {
 // Tracing helper functions
 
 func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	if tracer == nil {
+		// Return a no-op span when telemetry is disabled
+		return ctx, nooptrace.Span{}
+	}
 	return tracer.Start(ctx, name, opts...)
 }
 
 func AddEvent(ctx context.Context, name string, attrs ...attribute.KeyValue) {
-	span := trace.SpanFromContext(ctx)
-	span.AddEvent(name, trace.WithAttributes(attrs...))
+	if span := trace.SpanFromContext(ctx); span != nil {
+		span.AddEvent(name, trace.WithAttributes(attrs...))
+	}
 }
 
 func SetAttributes(ctx context.Context, attrs ...attribute.KeyValue) {
-	span := trace.SpanFromContext(ctx)
-	span.SetAttributes(attrs...)
+	if span := trace.SpanFromContext(ctx); span != nil {
+		span.SetAttributes(attrs...)
+	}
 }
 
 // Metrics helper functions
