@@ -12,15 +12,6 @@ services:
     volumes:
       - ./var/pgsql_data:/var/lib/postgresql/data
 
-  loki:
-    image: grafana/loki:latest
-    ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - ./var/loki_data:/loki
-      - ./loki-config.yaml:/etc/loki/local-config.yaml
-
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest # Use contrib image for more exporters
     command: ["--config=/etc/otel-collector-config.yaml"]

@@ -11,20 +11,3 @@ datasources:
     access: proxy
     url: http://jaeger:16686
     uid: jaeger
-
-  - name: PostgreSQL
-    type: postgres
-    url: psql:5432
-    database: ${DB_DATABASE}
-    user: ${DB_USERNAME}
-    secureJsonData:
-      password: ${DB_PASSWORD}
-    jsonData:
-      sslmode: "disable" # if you're not using SSL
-
-  - name: Loki
-    type: loki
-    access: proxy
-    url: http://loki:3100
-    jsonData:
-      maxLines: 1000
