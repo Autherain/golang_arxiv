@@ -42,7 +42,6 @@ func InitTelemetry(serviceName string, tracingEndpoint string, metricEndpoint st
 		return func() {}, nil
 	}
 
-	// The rest of the function remains the same
 	res, err := resource.New(context.Background(),
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(serviceName),
@@ -123,9 +122,9 @@ func createMetrics() error {
 		{"memory_alloc_bytes", "Current memory allocation in bytes", "bytes", "gauge"},
 		{"memory_total_alloc_bytes", "Total memory allocation in bytes", "bytes", "gauge"},
 		{"memory_sys_bytes", "System memory obtained in bytes", "bytes", "gauge"},
-		{"num_goroutines", "Number of goroutines", "{count}", "gauge"},
-		{"num_cpu", "Number of CPUs", "{count}", "gauge"},
-		{"gc_runs_total", "Total number of completed GC cycles", "{count}", "counter"},
+		{"num_goroutines", "Number of goroutines", "", "gauge"},
+		{"num_cpu", "Number of CPUs", "", "gauge"},
+		{"gc_runs_total", "Total number of completed GC cycles", "", "counter"},
 	}
 
 	for _, m := range metricsToCreate {

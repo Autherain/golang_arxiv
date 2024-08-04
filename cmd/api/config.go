@@ -15,6 +15,7 @@ type config struct {
 	port        int
 	env         string
 	serviceName string
+	version     float64
 	db          struct {
 		dsn          string
 		maxOpenConns int
@@ -43,10 +44,18 @@ type config struct {
 		traceRatio      float64
 		enabled         bool
 	}
+
+	logger struct {
+		sampleRate     int
+		thereAfterRate int
+		logLevel       string
+	}
 }
 
 func loadConfig() config {
 	var cfg config
+
+	cfg.version = getEnvAsFloat64("VERSION", 1.0)
 
 	cfg.port = getEnvAsInt("API_PORT", 4000)
 	cfg.env = os.Getenv("ENV")
@@ -77,6 +86,10 @@ func loadConfig() config {
 	cfg.telemetry.isInsecure = getEnvAsBool("ISINSECURE", true)
 	cfg.telemetry.traceRatio = getEnvAsFloat64("TRACE_RATIO", 0.1)
 	cfg.telemetry.enabled = getEnvAsBool("TELEMETRY_ENABLED", false)
+
+	cfg.logger.logLevel = os.Getenv("LOG_LEVEl")
+	cfg.logger.sampleRate = getEnvAsInt("SAMPLE_RATE", 1000)
+	cfg.logger.thereAfterRate = getEnvAsInt("THERE_AFTER_RATE", 1000)
 
 	return cfg
 }
