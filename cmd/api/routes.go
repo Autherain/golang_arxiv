@@ -1,7 +1,6 @@
 package main
 
 import (
-	"autherain/golang_arxiv/internal/observability"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
@@ -29,5 +28,5 @@ func (app *application) routes() http.Handler {
 	router.HandlerFunc(http.MethodPost, "/v1/tokens/activation", app.createActivationTokenHandler)
 	router.HandlerFunc(http.MethodPost, "/v1/tokens/password-reset", app.createPasswordResetTokenHandler)
 
-	return observability.TelemetryMiddleware(app.recoverPanic(app.enableCORS(app.rateLimit(app.authenticate(router)))))
+	return app.recoverPanic(app.enableCORS(app.rateLimit(app.authenticate(router))))
 }

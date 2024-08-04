@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"runtime"
 	"time"
 
@@ -13,11 +12,13 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/metric"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/metric/noop"          // Add this import
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric" // Add this import
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
+	nooptrace "go.opentelemetry.io/otel/trace/noop" // Add this import
 )
 
 var (
@@ -31,8 +32,17 @@ var (
 
 type ObservabilityShutdownFunc func()
 
-func InitTelemetry(serviceName string, tracingEndpoint string, metricEndpoint string, isInsecure bool, ratioTrace float64) (ObservabilityShutdownFunc, error) {
-	// Create a resource with service name and other attributes
+func InitTelemetry(serviceName string, tracingEndpoint string, metricEndpoint string, isInsecure bool, ratioTrace float64, enableTelemetry bool) (ObservabilityShutdownFunc, error) {
+	if !enableTelemetry {
+		// Use noop providers
+		otel.SetTracerProvider(nooptrace.NewTracerProvider())
+		otel.SetMeterProvider(noop.NewMeterProvider())
+
+		// Return a no-op shutdown function
+		return func() {}, nil
+	}
+
+	// The rest of the function remains the same
 	res, err := resource.New(context.Background(),
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(serviceName),
@@ -83,32 +93,9 @@ func InitTelemetry(serviceName string, tracingEndpoint string, metricEndpoint st
 	otel.SetMeterProvider(mp)
 	meter = mp.Meter("application-metrics")
 
-	// Create common metrics
-	if _, err := CreateCounter("http_requests_total", "Total number of HTTP requests", "{count}"); err != nil {
-		return nil, fmt.Errorf("failed to create http_requests_total counter: %w", err)
-	}
-	if _, err := CreateHistogram("http_request_duration_seconds", "HTTP request latencies in seconds", "s"); err != nil {
-		return nil, fmt.Errorf("failed to create http_request_duration_seconds histogram: %w", err)
-	}
-
-	// Add new metrics
-	if _, err := CreateGauge("memory_alloc_bytes", "Current memory allocation in bytes", "bytes"); err != nil {
-		return nil, fmt.Errorf("failed to create memory_alloc_bytes gauge: %w", err)
-	}
-	if _, err := CreateGauge("memory_total_alloc_bytes", "Total memory allocation in bytes", "bytes"); err != nil {
-		return nil, fmt.Errorf("failed to create memory_total_alloc_bytes gauge: %w", err)
-	}
-	if _, err := CreateGauge("memory_sys_bytes", "System memory obtained in bytes", "bytes"); err != nil {
-		return nil, fmt.Errorf("failed to create memory_sys_bytes gauge: %w", err)
-	}
-	if _, err := CreateGauge("num_goroutines", "Number of goroutines", "{count}"); err != nil {
-		return nil, fmt.Errorf("failed to create num_goroutines gauge: %w", err)
-	}
-	if _, err := CreateGauge("num_cpu", "Number of CPUs", "{count}"); err != nil {
-		return nil, fmt.Errorf("failed to create num_cpu gauge: %w", err)
-	}
-	if _, err := CreateCounter("gc_runs_total", "Total number of completed GC cycles", "{count}"); err != nil {
-		return nil, fmt.Errorf("failed to create gc_runs_total counter: %w", err)
+	// Create metrics
+	if err := createMetrics(); err != nil {
+		return nil, fmt.Errorf("failed to create metrics: %w", err)
 	}
 
 	// Start a goroutine to periodically update system metrics
@@ -124,6 +111,41 @@ func InitTelemetry(serviceName string, tracingEndpoint string, metricEndpoint st
 			log.Printf("Error shutting down meter provider: %v", err)
 		}
 	}), nil
+}
+
+func createMetrics() error {
+	metricsToCreate := []struct {
+		name        string
+		description string
+		unit        string
+		metricType  string
+	}{
+		{"memory_alloc_bytes", "Current memory allocation in bytes", "bytes", "gauge"},
+		{"memory_total_alloc_bytes", "Total memory allocation in bytes", "bytes", "gauge"},
+		{"memory_sys_bytes", "System memory obtained in bytes", "bytes", "gauge"},
+		{"num_goroutines", "Number of goroutines", "{count}", "gauge"},
+		{"num_cpu", "Number of CPUs", "{count}", "gauge"},
+		{"gc_runs_total", "Total number of completed GC cycles", "{count}", "counter"},
+	}
+
+	for _, m := range metricsToCreate {
+		var err error
+		switch m.metricType {
+		case "counter":
+			_, err = CreateCounter(m.name, m.description, m.unit)
+		case "gauge":
+			_, err = CreateGauge(m.name, m.description, m.unit)
+		case "histogram":
+			_, err = CreateHistogram(m.name, m.description, m.unit)
+		default:
+			return fmt.Errorf("unknown metric type: %s", m.metricType)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to create %s: %w", m.name, err)
+		}
+	}
+
+	return nil
 }
 
 // Tracing helper functions
@@ -245,45 +267,4 @@ func updateSystemMetrics(ctx context.Context) {
 			}
 		}
 	}
-}
-
-// Middleware for HTTP servers
-
-// TODO: Need to understand why it send two trace.
-func TelemetryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		start := time.Now()
-
-		// Start the main span for the request
-		ctx, span := tracer.Start(ctx, "http_request",
-			trace.WithAttributes(
-				attribute.String("http.method", r.Method),
-				attribute.String("http.url", r.URL.String()),
-				attribute.String("http.host", r.Host),
-				attribute.String("http.user_agent", r.UserAgent()),
-				attribute.String("path", r.URL.Path),
-			),
-		)
-		defer span.End()
-
-		// Call the next handler with the updated context
-		next.ServeHTTP(w, r.WithContext(ctx))
-
-		duration := time.Since(start).Seconds()
-
-		// Record metrics
-		IncrementCounter(ctx, "http_requests_total", 1,
-			attribute.String("method", r.Method),
-			attribute.String("path", r.URL.Path),
-		)
-		RecordHistogram(ctx, "http_request_duration_seconds", duration,
-			attribute.String("method", r.Method),
-			attribute.String("path", r.URL.Path),
-		)
-
-		// You could add some response information here if needed
-		// For example:
-		// span.SetAttributes(attribute.Int("http.status_code", getStatusCode(w)))
-	})
 }

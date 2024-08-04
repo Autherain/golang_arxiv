@@ -41,6 +41,7 @@ type config struct {
 		metricEndpoint  string
 		isInsecure      bool
 		traceRatio      float64
+		enabled         bool
 	}
 }
 
@@ -75,6 +76,7 @@ func loadConfig() config {
 	cfg.telemetry.metricEndpoint = os.Getenv("METRIC_ENDPOINT")
 	cfg.telemetry.isInsecure = getEnvAsBool("ISINSECURE", true)
 	cfg.telemetry.traceRatio = getEnvAsFloat64("TRACE_RATIO", 0.1)
+	cfg.telemetry.enabled = getEnvAsBool("TELEMETRY_ENABLED", false)
 
 	return cfg
 }

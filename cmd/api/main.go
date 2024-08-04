@@ -53,20 +53,19 @@ func main() {
 	defer db.Close()
 	logger.Info("database connection pool established")
 
-	telemetry, err := observability.InitTelemetry(cfg.serviceName, cfg.telemetry.tracingEndpoint, cfg.telemetry.metricEndpoint, cfg.telemetry.isInsecure, cfg.telemetry.traceRatio)
+	app := &application{
+		config: cfg,
+		logger: logger,
+		models: data.NewModels(db),
+		mailer: mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
+	}
+
+	telemetry, err := observability.InitTelemetry(cfg.serviceName, cfg.telemetry.tracingEndpoint, cfg.telemetry.metricEndpoint, cfg.telemetry.isInsecure, cfg.telemetry.traceRatio, cfg.telemetry.enabled)
 	if err != nil {
 		logger.Error("Failed to initialize telemetry", "error", err)
 		os.Exit(1)
 	}
 	defer telemetry()
-
-	app := &application{
-		config:    cfg,
-		logger:    logger,
-		models:    data.NewModels(db),
-		mailer:    mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
-		telemetry: telemetry,
-	}
 
 	err = app.serve()
 	if err != nil {
