@@ -2,6 +2,7 @@ package main
 
 import (
 	"autherain/golang_arxiv/internal/data"
+	"autherain/golang_arxiv/internal/observability"
 	"autherain/golang_arxiv/internal/validator"
 	"errors"
 	"fmt"
@@ -55,6 +56,9 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 	}()
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, span := observability.StartSpan(r.Context(), "middlewareRatelimit")
+		defer span.End()
+
 		if app.config.limiter.enabled {
 			ip := realip.FromRequest(r)
 
@@ -83,6 +87,9 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 
 func (app *application) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, span := observability.StartSpan(r.Context(), "middlewareAuthentication")
+		defer span.End()
+
 		w.Header().Add("Vary", "Authorization")
 
 		authorizationHeader := r.Header.Get("Authorization")
@@ -176,6 +183,9 @@ func (app *application) requirePermission(code string, next http.HandlerFunc) ht
 
 func (app *application) enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, span := observability.StartSpan(r.Context(), "middlewareEnableCors")
+		defer span.End()
+
 		w.Header().Add("Vary", "Origin")
 
 		w.Header().Add("Vary", "Access-Control-Request-Method")

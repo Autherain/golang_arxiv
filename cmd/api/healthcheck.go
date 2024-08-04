@@ -6,8 +6,9 @@ import (
 )
 
 func (app *application) healthcheckHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	app.logger.Info("Healtcheck")
 
+	ctx := r.Context()
 	// Start a child span for this specific handler
 	ctx, span := observability.StartSpan(ctx, "healthcheckHandler")
 	defer span.End()
@@ -25,8 +26,6 @@ func (app *application) healthcheckHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	observability.AddEvent(ctx, "Ended giving info")
-
-	app.logger.Info("Healtcheck")
 
 	err := app.writeJSON(w, http.StatusOK, env, nil)
 	if err != nil {

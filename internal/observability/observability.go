@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"runtime"
 	"time"
 
+	"github.com/uptrace/opentelemetry-go-extra/otelzap"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -19,6 +21,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
 	nooptrace "go.opentelemetry.io/otel/trace/noop" // Add this import
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -272,4 +276,95 @@ func updateSystemMetrics(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// TraceMiddleware starts a new trace for each HTTP request and logs request details
+func TraceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Start a new span for this request
+		ctx, span := StartSpan(r.Context(), "http_request")
+		defer span.End()
+
+		// Set span attributes
+		span.SetAttributes(
+			attribute.String("http.method", r.Method),
+			attribute.String("http.url", r.URL.String()),
+			attribute.String("http.host", r.Host),
+			attribute.String("http.user_agent", r.UserAgent()),
+		)
+
+		// Create a custom response writer to capture the status code
+		crw := &customResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Record the start time
+		startTime := time.Now()
+
+		// Call the next handler
+		next.ServeHTTP(crw, r.WithContext(ctx))
+
+		// Calculate request duration
+		duration := time.Since(startTime)
+
+		// Set the status code attribute on the span
+		span.SetAttributes(attribute.Int("http.status_code", crw.statusCode))
+
+		// Log request details using zap with OpenTelemetry
+		zap.L().Info("HTTP request processed",
+			zap.String("method", r.Method),
+			zap.String("url", r.URL.String()),
+			zap.Int("status", crw.statusCode),
+			zap.Duration("duration", duration),
+			zap.String("trace_id", span.SpanContext().TraceID().String()),
+			zap.String("span_id", span.SpanContext().SpanID().String()),
+		)
+
+		// Record request duration in a histogram
+		RecordHistogram(ctx, "http_request_duration_seconds", duration.Seconds(),
+			attribute.String("method", r.Method),
+			attribute.String("path", r.URL.Path),
+			attribute.Int("status", crw.statusCode),
+		)
+
+		// Increment request counter
+		IncrementCounter(ctx, "http_requests_total", 1,
+			attribute.String("method", r.Method),
+			attribute.String("path", r.URL.Path),
+			attribute.Int("status", crw.statusCode),
+		)
+	})
+}
+
+// customResponseWriter is a wrapper for http.ResponseWriter that captures the status code
+type customResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (crw *customResponseWriter) WriteHeader(statusCode int) {
+	crw.statusCode = statusCode
+	crw.ResponseWriter.WriteHeader(statusCode)
+}
+
+// InitializeObservability sets up the observability components
+func InitializeObservability(serviceName, tracingEndpoint, metricEndpoint string, isInsecure bool, ratioTrace float64, enableTelemetry bool) (ObservabilityShutdownFunc, error) {
+	// Initialize telemetry
+	shutdownFunc, err := InitTelemetry(serviceName, tracingEndpoint, metricEndpoint, isInsecure, ratioTrace, enableTelemetry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize telemetry: %w", err)
+	}
+
+	// Initialize zap logger
+	zapLogger, err := zap.NewProduction(zap.AddStacktrace(zapcore.FatalLevel))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create zap logger: %w", err)
+	}
+
+	// Replace global logger with otelzap logger
+	otelLogger := otelzap.New(zapLogger)
+	otelzap.ReplaceGlobals(otelLogger)
+
+	return ObservabilityShutdownFunc(func() {
+		shutdownFunc()
+		_ = zapLogger.Sync()
+	}), nil
 }
